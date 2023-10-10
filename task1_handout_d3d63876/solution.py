@@ -32,6 +32,10 @@ class Model(object):
 
         # TODO: Add custom initialization for your model here if necessary
 
+        self.kernel = kernel = 1.0 * RBF(length_scale=1e1, length_scale_bounds=(1e-2, 1e3)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
+        self.gp = GaussianProcessRegressor(kernel=kernel, alpha=0.0)
+
+
     def make_predictions(self, test_x_2D: np.ndarray, test_x_AREA: np.ndarray) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Predict the pollution concentration for a given set of city_areas.
@@ -47,7 +51,8 @@ class Model(object):
         gp_std = np.zeros(test_x_2D.shape[0], dtype=float)
 
         # TODO: Use the GP posterior to form your predictions here
-        predictions = gp_mean
+        # predictions = gp_mean
+
 
         return predictions, gp_mean, gp_std
 
@@ -59,6 +64,9 @@ class Model(object):
         """
 
         # TODO: Fit your model here
+
+        self.gp.fit(train_x_2D, train_y)
+
         pass
 
 # You don't have to change this function
@@ -178,6 +186,8 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
     test_x_AREA = np.zeros((test_x.shape[0],), dtype=bool)
 
     #TODO: Extract the city_area information from the training and test features
+
+    
 
     assert train_x_2D.shape[0] == train_x_AREA.shape[0] and test_x_2D.shape[0] == test_x_AREA.shape[0]
     assert train_x_2D.shape[1] == 2 and test_x_2D.shape[1] == 2
