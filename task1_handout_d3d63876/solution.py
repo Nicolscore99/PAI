@@ -187,7 +187,10 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
 
     #TODO: Extract the city_area information from the training and test features
 
-    
+    train_x_2D = train_x[:,0:2]
+    train_x_AREA = train_x[:,2]
+    test_x_2D = test_x[:,0:2]
+    test_x_AREA = test_x[:,2]
 
     assert train_x_2D.shape[0] == train_x_AREA.shape[0] and test_x_2D.shape[0] == test_x_AREA.shape[0]
     assert train_x_2D.shape[1] == 2 and test_x_2D.shape[1] == 2
