@@ -36,10 +36,12 @@ class Model(object):
 
         # TODO: Add custom initialization for your model here if necessary
 
-        self.kernel = 1.0 * RBF(length_scale=1e1, length_scale_bounds=(1e-2, 1e3)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
+        # self.kernel = 1.0 * RBF(length_scale=1e1, length_scale_bounds=(1e-2, 1e3)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
+        # self.kernel = Matern(length_scale=0.01, nu=2.5) + RationalQuadratic(length_scale=0.05, alpha=0.5) +  WhiteKernel(noise_level=1e-5)
+        self.kernel = Matern(length_scale=0.01, nu=2.5) +  WhiteKernel(noise_level=1e-5)
 
-        self.feature_map = RBFSampler(gamma=1, n_components=2, random_state=self.random_state)
-        # feature_map = Nystroem(gamma=1, n_components=2, random_state=1)
+        # self.feature_map = RBFSampler(gamma=1, n_components=2, random_state=self.random_state)
+        self.feature_map = Nystroem(gamma=1, n_components=2, random_state=1)
 
         self.gp = GaussianProcessRegressor(kernel=self.kernel, alpha=0.01, n_restarts_optimizer=10, random_state=42)
 
@@ -250,8 +252,8 @@ def main():
     # Extract the city_area information
     train_x_2D, train_x_AREA, test_x_2D, test_x_AREA = extract_city_area_information(train_x, test_x)
     
-    print(train_x_2D.shape)
-    print(train_y.shape)
+    # print(train_x_2D.shape)
+    # print(train_y.shape)
 
     # Reduce the size of the training set
     train_x_2D, train_y, train_x_AREA = reduce_trainset_size(train_x_2D, train_y, train_x_AREA, trainset_size=1000)
