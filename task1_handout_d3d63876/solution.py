@@ -5,10 +5,13 @@ import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
 import matplotlib.pyplot as plt
 from matplotlib import cm
-
+from sklearn.kernel_approximation import (RBFSampler, Nystroem)
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import train_test_split, ParameterGrid
+from sklearn import pipeline
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
-EXTENDED_EVALUATION = False
+EXTENDED_EVALUATION = True
 EVALUATION_GRID_POINTS = 300  # Number of grid points used in extended evaluation
 
 # Cost function constants
@@ -29,12 +32,16 @@ class Model(object):
         We already provide a random number generator for reproducibility.
         """
         self.rng = np.random.default_rng(seed=0)
+        self.random_state = 42
 
         # TODO: Add custom initialization for your model here if necessary
 
-        self.kernel = kernel = 1.0 * RBF(length_scale=1e1, length_scale_bounds=(1e-2, 1e3)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
-        self.gp = GaussianProcessRegressor(kernel=kernel, alpha=0.0)
+        self.kernel = 1.0 * RBF(length_scale=1e1, length_scale_bounds=(1e-2, 1e3)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
 
+        self.feature_map = RBFSampler(gamma=1, n_components=2, random_state=self.random_state)
+        # feature_map = Nystroem(gamma=1, n_components=2, random_state=1)
+
+        self.gp = GaussianProcessRegressor(kernel=self.kernel, alpha=0.01, n_restarts_optimizer=10, random_state=42)
 
     def make_predictions(self, test_x_2D: np.ndarray, test_x_AREA: np.ndarray) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -51,8 +58,9 @@ class Model(object):
         gp_std = np.zeros(test_x_2D.shape[0], dtype=float)
 
         # TODO: Use the GP posterior to form your predictions here
-        # predictions = gp_mean
+        gp_mean, gp_std = self.gp.predict(test_x_2D, return_std=True)
 
+        predictions = gp_mean + np.ones(test_x_2D.shape[0], dtype=float) * self.y_mean
 
         return predictions, gp_mean, gp_std
 
@@ -64,8 +72,16 @@ class Model(object):
         """
 
         # TODO: Fit your model here
+        scaler = StandardScaler().fit(train_x_2D)
+        self.y_mean = train_y.mean()
 
-        self.gp.fit(train_x_2D, train_y)
+        gpr_pipeline = pipeline.Pipeline([
+                                        ("scaler", scaler),
+                                        ("feature_map", self.feature_map),
+                                        ("gp", self.gp)
+                                        ])
+
+        gpr_pipeline.fit(train_x_2D, train_y - self.y_mean)
 
         pass
 
@@ -186,7 +202,6 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
     test_x_AREA = np.zeros((test_x.shape[0],), dtype=bool)
 
     #TODO: Extract the city_area information from the training and test features
-
     train_x_2D = train_x[:,0:2]
     train_x_AREA = train_x[:,2]
     test_x_2D = test_x[:,0:2]
@@ -198,15 +213,49 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
 
     return train_x_2D, train_x_AREA, test_x_2D, test_x_AREA
 
+# takes a subsamlple of train_x, train_y and train_x_AREA of size trainset_size
+def reduce_trainset_size(train_x: np.ndarray, train_y: np.ndarray, train_x_AREA: np.ndarray, trainset_size: int) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Reduces the size of the training set to the given size.
+    :param train_x: Training features
+    :param train_y: Training pollution concentrations
+    :param train_x_AREA: Training city_area information
+    :param trainset_size: Size of the reduced training set
+    :return: Tuple of (reduced training features, reduced training pollution concentrations,
+        reduced training city_area information)
+    """
+    assert train_x.shape[0] == train_y.shape[0] and train_x.shape[0] == train_x_AREA.shape[0]
+    assert train_x.shape[1] == 2 and train_x_AREA.ndim == 1
+
+    num_rows = train_x.shape[0]
+
+    # Generate a random set of row indices to select
+    selected_indices = np.random.choice(num_rows, trainset_size, replace=False)
+    
+    # Use the selected indices to slice the arrays
+    reduced_train_x = train_x[selected_indices, :]
+    reduced_train_y = train_y[selected_indices]
+    reduced_train_x_AREA = train_x_AREA[selected_indices]
+
+    return reduced_train_x, reduced_train_y, reduced_train_x_AREA
+
+
 # you don't have to change this function
 def main():
     # Load the training dateset and test features
-    train_x = np.loadtxt('train_x.csv', delimiter=',', skiprows=1)
-    train_y = np.loadtxt('train_y.csv', delimiter=',', skiprows=1)
-    test_x = np.loadtxt('test_x.csv', delimiter=',', skiprows=1)
+    train_x = np.loadtxt('task1_handout_d3d63876/train_x.csv', delimiter=',', skiprows=1)
+    train_y = np.loadtxt('task1_handout_d3d63876/train_y.csv', delimiter=',', skiprows=1)
+    test_x = np.loadtxt('task1_handout_d3d63876/test_x.csv', delimiter=',', skiprows=1)
 
     # Extract the city_area information
     train_x_2D, train_x_AREA, test_x_2D, test_x_AREA = extract_city_area_information(train_x, test_x)
+    
+    print(train_x_2D.shape)
+    print(train_y.shape)
+
+    # Reduce the size of the training set
+    train_x_2D, train_y, train_x_AREA = reduce_trainset_size(train_x_2D, train_y, train_x_AREA, trainset_size=1000)
+
     # Fit the model
     print('Fitting model')
     model = Model()
