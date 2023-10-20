@@ -1,17 +1,15 @@
 import os
 import typing
 from sklearn.gaussian_process.kernels import *
-import numpy as np
 from sklearn.gaussian_process import GaussianProcessRegressor
+from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 from matplotlib import cm
-from sklearn.kernel_approximation import (RBFSampler, Nystroem)
-from sklearn.preprocessing import StandardScaler
-from sklearn.model_selection import train_test_split, ParameterGrid
-from sklearn import pipeline
+import numpy as np
+
 
 # Set `EXTENDED_EVALUATION` to `True` in order to visualize your predictions.
-EXTENDED_EVALUATION = True
+EXTENDED_EVALUATION = False
 EVALUATION_GRID_POINTS = 300  # Number of grid points used in extended evaluation
 
 # Cost function constants
@@ -32,18 +30,12 @@ class Model(object):
         We already provide a random number generator for reproducibility.
         """
         self.rng = np.random.default_rng(seed=0)
-        self.random_state = 42
+        self.kernel = RationalQuadratic() + WhiteKernel() + ExpSineSquared()
+        self.model = GaussianProcessRegressor(kernel=self.kernel,random_state=0, optimizer='fmin_l_bfgs_b',
+                                              n_restarts_optimizer=3, normalize_y=True)
+        self.gpr = None
 
         # TODO: Add custom initialization for your model here if necessary
-
-        # self.kernel = 1.0 * RBF(length_scale=1e1, length_scale_bounds=(1e-2, 1e3)) + WhiteKernel(noise_level=1, noise_level_bounds=(1e-5, 1e1))
-        # self.kernel = Matern(length_scale=0.01, nu=2.5) + RationalQuadratic(length_scale=0.05, alpha=0.5) +  WhiteKernel(noise_level=1e-5)
-        self.kernel = Matern(length_scale=0.01, nu=2.5) +  WhiteKernel(noise_level=1e-5)
-
-        # self.feature_map = RBFSampler(gamma=1, n_components=2, random_state=self.random_state)
-        self.feature_map = Nystroem(gamma=1, n_components=2, random_state=1)
-
-        self.gp = GaussianProcessRegressor(kernel=self.kernel, alpha=0.01, n_restarts_optimizer=10, random_state=42)
 
     def make_predictions(self, test_x_2D: np.ndarray, test_x_AREA: np.ndarray) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
@@ -59,12 +51,30 @@ class Model(object):
         gp_mean = np.zeros(test_x_2D.shape[0], dtype=float)
         gp_std = np.zeros(test_x_2D.shape[0], dtype=float)
 
-        # TODO: Use the GP posterior to form your predictions here
-        gp_mean, gp_std = self.gp.predict(test_x_2D, return_std=True)
+        gp_mean, gp_std = self.gpr.predict(test_x_2D,return_std=True)
 
-        predictions = gp_mean + np.ones(test_x_2D.shape[0], dtype=float) * self.y_mean
+        # TODO: Use the GP posterior to form your predictions here
+        predictions = gp_mean
+        NUM_SAMPLES = len(gp_mean)
+        predictions = gp_mean
+        for i in range(NUM_SAMPLES):
+            if (test_x_AREA[i] == 1):
+                predictions[i] = gp_mean[i] + 0.00001 * gp_std[i]
 
         return predictions, gp_mean, gp_std
+
+    def return_mixed_reduced_trainset(self, train_x_incity, train_x_outofcity, train_y_incity, train_y_outofcity, total_size, portion):
+
+        num_in_city = int(total_size * portion)
+        num_outof_city = total_size - num_in_city
+
+        selected_in_city_indices = np.random.choice(train_x_incity.shape[0], num_in_city, replace=False)
+        selected_outof_city_indices = np.random.choice(train_x_outofcity.shape[0], num_outof_city, replace=False)
+
+        reduced_train_x = np.concatenate((train_x_incity[selected_in_city_indices,:], train_x_outofcity[selected_outof_city_indices,:]), axis=0)
+        reduced_train_y = np.concatenate((train_y_incity[selected_in_city_indices], train_y_outofcity[selected_outof_city_indices]), axis=0)
+
+        return reduced_train_x, reduced_train_y
 
     def fitting_model(self, train_y: np.ndarray,train_x_2D: np.ndarray):
         """
@@ -72,20 +82,20 @@ class Model(object):
         :param train_x_2D: Training features as a 2d NumPy float array of shape (NUM_SAMPLES, 2)
         :param train_y: Training pollution concentrations as a 1d NumPy float array of shape (NUM_SAMPLES,)
         """
+        train_x_area_info = determine_city_area_idx(train_x_2D)
+
+        in_city_mask = (train_x_area_info == 1)
+        outof_city_mask = (train_x_area_info== 0)
+
+        train_x_in_city = train_x_2D[np.where(in_city_mask)]
+        train_x_outof_city = train_x_2D[np.where(outof_city_mask)]
+        train_y_in_city = train_y[np.where(in_city_mask)]
+        train_y_outof_city = train_y[np.where(outof_city_mask)]
+
+        reduced_train_x, reduced_train_y = self.return_mixed_reduced_trainset(train_x_in_city, train_x_outof_city, train_y_in_city, train_y_outof_city, total_size=5000, portion=0.8)
 
         # TODO: Fit your model here
-        scaler = StandardScaler().fit(train_x_2D)
-        self.y_mean = train_y.mean()
-
-        gpr_pipeline = pipeline.Pipeline([
-                                        ("scaler", scaler),
-                                        ("feature_map", self.feature_map),
-                                        ("gp", self.gp)
-                                        ])
-
-        gpr_pipeline.fit(train_x_2D, train_y - self.y_mean)
-
-        pass
+        self.gpr = self.model.fit(reduced_train_x,reduced_train_y)
 
 # You don't have to change this function
 def cost_function(ground_truth: np.ndarray, predictions: np.ndarray, AREA_idxs: np.ndarray) -> float:
@@ -203,7 +213,9 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
     test_x_2D = np.zeros((test_x.shape[0], 2), dtype=float)
     test_x_AREA = np.zeros((test_x.shape[0],), dtype=bool)
 
-    #TODO: Extract the city_area information from the training and test features
+    #TODO: Extract the city_area information from the training and test features)
+    # DONE
+
     train_x_2D = train_x[:,0:2]
     train_x_AREA = train_x[:,2]
     test_x_2D = test_x[:,0:2]
@@ -215,49 +227,15 @@ def extract_city_area_information(train_x: np.ndarray, test_x: np.ndarray) -> ty
 
     return train_x_2D, train_x_AREA, test_x_2D, test_x_AREA
 
-# takes a subsamlple of train_x, train_y and train_x_AREA of size trainset_size
-def reduce_trainset_size(train_x: np.ndarray, train_y: np.ndarray, train_x_AREA: np.ndarray, trainset_size: int) -> typing.Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Reduces the size of the training set to the given size.
-    :param train_x: Training features
-    :param train_y: Training pollution concentrations
-    :param train_x_AREA: Training city_area information
-    :param trainset_size: Size of the reduced training set
-    :return: Tuple of (reduced training features, reduced training pollution concentrations,
-        reduced training city_area information)
-    """
-    assert train_x.shape[0] == train_y.shape[0] and train_x.shape[0] == train_x_AREA.shape[0]
-    assert train_x.shape[1] == 2 and train_x_AREA.ndim == 1
-
-    num_rows = train_x.shape[0]
-
-    # Generate a random set of row indices to select
-    selected_indices = np.random.choice(num_rows, trainset_size, replace=False)
-    
-    # Use the selected indices to slice the arrays
-    reduced_train_x = train_x[selected_indices, :]
-    reduced_train_y = train_y[selected_indices]
-    reduced_train_x_AREA = train_x_AREA[selected_indices]
-
-    return reduced_train_x, reduced_train_y, reduced_train_x_AREA
-
-
 # you don't have to change this function
 def main():
     # Load the training dateset and test features
-    train_x = np.loadtxt('task1_handout_d3d63876/train_x.csv', delimiter=',', skiprows=1)
-    train_y = np.loadtxt('task1_handout_d3d63876/train_y.csv', delimiter=',', skiprows=1)
-    test_x = np.loadtxt('task1_handout_d3d63876/test_x.csv', delimiter=',', skiprows=1)
+    train_x = np.loadtxt('train_x.csv', delimiter=',', skiprows=1)
+    train_y = np.loadtxt('train_y.csv', delimiter=',', skiprows=1)
+    test_x = np.loadtxt('test_x.csv', delimiter=',', skiprows=1)
 
     # Extract the city_area information
     train_x_2D, train_x_AREA, test_x_2D, test_x_AREA = extract_city_area_information(train_x, test_x)
-    
-    # print(train_x_2D.shape)
-    # print(train_y.shape)
-
-    # Reduce the size of the training set
-    train_x_2D, train_y, train_x_AREA = reduce_trainset_size(train_x_2D, train_y, train_x_AREA, trainset_size=1000)
-
     # Fit the model
     print('Fitting model')
     model = Model()
