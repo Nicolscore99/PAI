@@ -54,12 +54,14 @@ class Model(object):
         gp_mean, gp_std = self.gpr.predict(test_x_2D,return_std=True)
 
         # TODO: Use the GP posterior to form your predictions here
+        # NUM_SAMPLES = len(gp_mean)
         predictions = gp_mean
-        NUM_SAMPLES = len(gp_mean)
-        predictions = gp_mean
-        for i in range(NUM_SAMPLES):
-            if (test_x_AREA[i] == 1):
-                predictions[i] = gp_mean[i] + 0.00001 * gp_std[i]
+        # for i in range(NUM_SAMPLES):
+        #     if (test_x_AREA[i] == 1):
+        #         predictions[i] = gp_mean[i] + 0.00001 * gp_std[i]s
+
+
+        # TODO: Just use two fitting models for the two areas and switch
 
         return predictions, gp_mean, gp_std
 
@@ -92,7 +94,7 @@ class Model(object):
         train_y_in_city = train_y[np.where(in_city_mask)]
         train_y_outof_city = train_y[np.where(outof_city_mask)]
 
-        reduced_train_x, reduced_train_y = self.return_mixed_reduced_trainset(train_x_in_city, train_x_outof_city, train_y_in_city, train_y_outof_city, total_size=5000, portion=0.8)
+        reduced_train_x, reduced_train_y = self.return_mixed_reduced_trainset(train_x_in_city, train_x_outof_city, train_y_in_city, train_y_outof_city, total_size=1000, portion=0.5)
 
         # TODO: Fit your model here
         self.gpr = self.model.fit(reduced_train_x,reduced_train_y)
