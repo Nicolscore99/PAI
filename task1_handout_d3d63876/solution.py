@@ -31,8 +31,12 @@ class Model(object):
         """
         self.rng = np.random.default_rng(seed=0)
         self.kernel = RationalQuadratic() + WhiteKernel() + ExpSineSquared()
-        self.model = GaussianProcessRegressor(kernel=self.kernel,random_state=0, optimizer='fmin_l_bfgs_b',
+        self.model_incity = GaussianProcessRegressor(kernel=self.kernel,random_state=0, optimizer='fmin_l_bfgs_b',
                                               n_restarts_optimizer=3, normalize_y=True)
+        self.model_outofcity = GaussianProcessRegressor(kernel=self.kernel,random_state=0, optimizer='fmin_l_bfgs_b',
+                                              n_restarts_optimizer=3, normalize_y=True)
+        # self.model_mixed = GaussianProcessRegressor(kernel=self.kernel,random_state=0, optimizer='fmin_l_bfgs_b',
+        #                                       n_restarts_optimizer=3, normalize_y=True)
         self.gpr = None
 
         # TODO: Add custom initialization for your model here if necessary
@@ -51,16 +55,16 @@ class Model(object):
         gp_mean = np.zeros(test_x_2D.shape[0], dtype=float)
         gp_std = np.zeros(test_x_2D.shape[0], dtype=float)
 
-        gp_mean, gp_std = self.gpr.predict(test_x_2D,return_std=True)
+        mask_incity = (test_x_AREA == 1)
+        mask_outofcity = (test_x_AREA == 0)
 
-        # TODO: Use the GP posterior to form your predictions here
-        # NUM_SAMPLES = len(gp_mean)
+        test_x_incity = test_x_2D[np.where(mask_incity)]
+        test_x_outofcity = test_x_2D[np.where(mask_outofcity)]
+
+        gp_mean[np.where(mask_incity)], gp_std[np.where(mask_incity)] = self.gpr_incity.predict(test_x_incity, return_std=True)
+        gp_mean[np.where(mask_outofcity)], gp_std[np.where(mask_outofcity)] = self.gpr_outofcity.predict(test_x_outofcity, return_std=True)
+
         predictions = gp_mean
-        # for i in range(NUM_SAMPLES):
-        #     if (test_x_AREA[i] == 1):
-        #         predictions[i] = gp_mean[i] + 0.00001 * gp_std[i]s
-
-
         # TODO: Just use two fitting models for the two areas and switch
 
         return predictions, gp_mean, gp_std
@@ -76,6 +80,15 @@ class Model(object):
         reduced_train_x = np.concatenate((train_x_incity[selected_in_city_indices,:], train_x_outofcity[selected_outof_city_indices,:]), axis=0)
         reduced_train_y = np.concatenate((train_y_incity[selected_in_city_indices], train_y_outofcity[selected_outof_city_indices]), axis=0)
 
+        return reduced_train_x, reduced_train_y
+    
+    def reduce_trainset(self, train_x, train_y, total_size):
+        if total_size >= train_x.shape[0]:
+            return train_x, train_y
+
+        selected_indices = np.random.choice(train_x.shape[0], total_size, replace=False)
+        reduced_train_x = train_x[selected_indices,:]
+        reduced_train_y = train_y[selected_indices]
         return reduced_train_x, reduced_train_y
 
     def fitting_model(self, train_y: np.ndarray,train_x_2D: np.ndarray):
@@ -94,10 +107,18 @@ class Model(object):
         train_y_in_city = train_y[np.where(in_city_mask)]
         train_y_outof_city = train_y[np.where(outof_city_mask)]
 
-        reduced_train_x, reduced_train_y = self.return_mixed_reduced_trainset(train_x_in_city, train_x_outof_city, train_y_in_city, train_y_outof_city, total_size=1000, portion=0.5)
+        # reduced_train_x, reduced_train_y = self.return_mixed_reduced_trainset(train_x_in_city, train_x_outof_city, train_y_in_city, train_y_outof_city, total_size=1000, portion=0.5)
+        reduced_train_x_incity, reduced_train_y_incity = self.reduce_trainset(train_x_in_city, train_y_in_city, total_size=3000)
+        reduced_train_x_outofcity, reduced_train_y_outofcity = self.reduce_trainset(train_x_outof_city, train_y_outof_city, total_size=3000)
 
-        # TODO: Fit your model here
-        self.gpr = self.model.fit(reduced_train_x,reduced_train_y)
+        # # Fitting combined model
+        # self.gpr_mixed = self.model_mixed(reduced_train_x, reduced_train_y)
+
+        print("Fitting model for incity")
+        self.gpr_incity = self.model_incity.fit(train_x_in_city,train_y_in_city)
+        print("Fitting model for outofcity")
+        self.gpr_outofcity = self.model_outofcity.fit(train_x_outof_city,train_y_outof_city)
+
 
 # You don't have to change this function
 def cost_function(ground_truth: np.ndarray, predictions: np.ndarray, AREA_idxs: np.ndarray) -> float:
