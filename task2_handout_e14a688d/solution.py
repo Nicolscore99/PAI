@@ -133,6 +133,8 @@ class SWAGInference(object):
         :param bma_samples: Number of networks to sample for Bayesian model averaging during prediction
         """
 
+        print("INFERENCE MODE:", inference_mode)
+
         self.model_dir = model_dir
         self.inference_mode = inference_mode
         self.swag_epochs = swag_epochs
@@ -470,6 +472,7 @@ class SWAGInference(object):
         if USE_PRETRAINED_INIT:
             self.network.load_state_dict(torch.load(PRETRAINED_WEIGHTS_FILE))
             print("Loaded pretrained MAP weights from", PRETRAINED_WEIGHTS_FILE)
+            print("Testtest")
         else:
             self.fit_map(loader)
 
