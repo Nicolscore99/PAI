@@ -158,8 +158,10 @@ class SWAGInference(object):
         #  but can always act on per-layer weights (in the format that _create_weight_copy() returns)
 
         # Until now these are full zero weights, but they should not be
-        self.theta_bar = None
-        self.theta_bar_square = None
+        # first running moment
+        self.theta_bar = {name: torch.zeros_like(param, requires_grad = False) for name, param in self.network.named_parameters()}
+        # second running moment
+        self.theta_bar_square = {name: torch.zeros_like(param, requires_grad = False) for name, param in self.network.named_parameters()}
         self.epoch = 0
 
         # Create a list of weight vectors. Each element of the list is a weight vector.
@@ -175,7 +177,7 @@ class SWAGInference(object):
 
         # Calibration, prediction, and other attributes
         # TODO(2): create additional attributes, e.g., for calibration
-        self._prediction_threshold = None  # this is an example, feel free to be creative
+        self._prediction_threshold = 0.7 #sw this is an example, feel free to be creative
 
     def update_swag(self) -> None:
         """
@@ -397,7 +399,7 @@ class SWAGInference(object):
             # TODO(1): Sample parameter values for SWAG-diagonal
             # raise NotImplementedError("Sample parameter for SWAG-diagonal")
             current_mean = self.theta_bar[name]
-            current_std = 1/sqrt(2)*self.sigma_diag[name].sqrt()
+            current_std = torch.sqrt(self.sigma_diag[name])
             assert current_mean.size() == param.size() and current_std.size() == param.size()
 
             # Diagonal part
@@ -407,9 +409,21 @@ class SWAGInference(object):
             if self.inference_mode == InferenceMode.SWAG_FULL:
                 # TODO(2): Sample parameter values for full SWAG
                 # raise NotImplementedError("Sample parameter for full SWAG")
-                z_2 = torch.randn(param.size())
-                D_hat_square = self.D_hat[name] * self.D_hat[name].t()
-                sampled_param += 1 / np.sqrt(2 * (self.deviation_matrix_max_rank - 1)) * D_hat_square.sqrt() * z_2
+                z_2 = torch.randn(self.deviation_matrix_max_rank)
+
+                # D_hat_name = torch.zeros(param.size())
+                # for k in range(self.deviation_matrix_max_rank):
+                #     D_hat_k = self.D_hat[k]
+                #     z_2 = torch.randn(param.size())
+                #     D_hat_name += D_hat_k[name] * z_2
+
+
+                D_hat_row = [queue[name] for queue in self.D_hat]
+                D_hat_row_flat = torch.stack([element.view(-1) for element in D_hat_row], dim=1)
+                D_hat_z2_prod = torch.matmul(D_hat_row_flat, z_2)
+                D_hat_name = D_hat_z2_prod.view(*param.size())
+                
+                sampled_param = current_mean + (1/math.sqrt(2))*current_std*z_1 + 1 / np.sqrt(2 * (self.deviation_matrix_max_rank - 1)) * D_hat_name
 
             # Modify weight value in-place; directly changing self.network
             param.data = sampled_param
@@ -472,7 +486,6 @@ class SWAGInference(object):
         if USE_PRETRAINED_INIT:
             self.network.load_state_dict(torch.load(PRETRAINED_WEIGHTS_FILE))
             print("Loaded pretrained MAP weights from", PRETRAINED_WEIGHTS_FILE)
-            print("Testtest")
         else:
             self.fit_map(loader)
 
