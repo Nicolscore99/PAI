@@ -4,7 +4,12 @@ from scipy.optimize import fmin_l_bfgs_b
 # import additional ...
 import math
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, ConstantKernel, DotProduct
+from sklearn.gaussian_process.kernels import Matern, ConstantKernel, DotProduct, RBF
+
+import matplotlib.pyplot as plt
+from matplotlib import gridspec
+
+plt.ion()  # Enable interactive mode
 
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
@@ -33,15 +38,20 @@ class BO_algo():
 
         self.v_nu = 2.5
         self.v_length_scale = 0.5
+        self.v_var = math.sqrt(2)
+        self.v_prior_mean = 4.0
         self.v_kernel = DotProduct() + Matern(length_scale=self.v_length_scale, nu=self.v_nu)
+        # self.v_kernel = ConstantKernel(constant_value=self.v_prior_mean)*RBF(length_scale=self.v_length_scale)
+
+
 
         # Define the GP models
         self.f_gp = GaussianProcessRegressor(kernel=self.f_kernel)
         self.v_gp = GaussianProcessRegressor(kernel=self.v_kernel)
 
         # Eploration-exploitation trade-off parameter
-        self.f_beta = 2.0
-        self.v_beta = 2.0
+        self.f_beta = 0.5
+        self.v_beta = 1.0
         # Constraint violation penalty
         self.lambda_ = 0.5
 
@@ -61,6 +71,13 @@ class BO_algo():
         # optimize_acquisition_function() defined below.
 
         # Implement some custom rule  to include randomness
+
+        # If the last two points were unsafe, then sample randomly 
+        # if self.x_sample.size > 1 and self.v_sample[-1] > SAFETY_THRESHOLD and self.v_sample[-2] > SAFETY_THRESHOLD:
+        #     print("You are in a bad place, let's get out of here...")
+        #     # sample randomly
+        #     x = np.random.uniform(*DOMAIN[0])
+        #     return x
 
         return self.optimize_acquisition_function()
 
@@ -116,8 +133,20 @@ class BO_algo():
         v_mean, v_std = self.v_gp.predict(x, return_std=True)
 
         # compute the acquisition function
-        # TODO: Maybe 0 needs to be replaced by the minimum of the constraint function
-        af_value = f_mean + self.f_beta * f_std + self.lambda_*max((v_mean + self.v_beta * v_std), 0)
+        # Here I've changed the plusses and minuses to account for the fact that
+
+        # We want to ..
+        # 1. Chose points with high f_mean
+        # 2. Chose points with low f_std
+        # 3. Chose points with low v_mean
+        # 4. Chose points with low v_std
+
+        af_value = f_mean - self.f_beta * f_std - self.lambda_*max((v_mean + self.v_beta * v_std), 0)
+
+        # print("f_mean: ", f_mean)
+        # print("f_std: ", f_std)
+        # print("v_mean: ", v_mean)
+        # print("v_std: ", v_std)
 
         return af_value
 
@@ -147,6 +176,7 @@ class BO_algo():
         self.f_gp.fit(self.x_sample, self.f_sample)
         self.v_gp.fit(self.x_sample, self.v_sample)
 
+
     def get_solution(self):
         """
         Return x_opt that is believed to be the maximizer of f.
@@ -157,6 +187,10 @@ class BO_algo():
             the optimal solution of the problem
         """
         # TODO: Return your predicted safe optimum of f.
+
+        # # plot the GP model
+        # if self.x_sample.size > 1:
+        #     self.plot(plot_recommendation=True)
 
         valid_samples = self.f_sample[self.v_sample < SAFETY_THRESHOLD]
         solution = valid_samples[np.argmax(valid_samples)]
@@ -171,8 +205,52 @@ class BO_algo():
         plot_recommendation: bool
             Plots the recommended point if True.
         """
-        pass
 
+        print("Plotting...")
+
+        fig = plt.figure(figsize=(10, 10))
+        gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
+
+        # Plot objective function
+        ax = plt.subplot(gs[0])
+        x = np.linspace(*DOMAIN[0], 100)[:, None]
+        f_mean, f_std = self.f_gp.predict(x, return_std=True)
+        ax.plot(x, f_mean, 'k', lw=2, zorder=9, label="Posterior mean $f(x)$")
+        ax.fill_between(x[:,0], f_mean - f_std, f_mean + f_std,
+                        color='C0', alpha=0.2,
+                        label="Confidence region $\pm$ 1 std. dev.")
+        ax.plot(self.x_sample, self.f_sample, 'kx', mew=3, label="Observed data $f(x)$")
+        ax.set_ylabel('$f(x)$')
+        ax.set_xlim(*DOMAIN[0])
+        ax.set_ylim(np.min(f_mean - 3 * f_std), np.max(f_mean + 3 * f_std))
+        ax.set_title('Objective function')
+        ax.legend(loc='upper left')
+
+        # Plot constraint function
+        ax = plt.subplot(gs[1])
+        v_mean, v_std = self.v_gp.predict(x, return_std=True)
+        ax.plot(x, v_mean, 'k', lw=2, zorder=9, label="Posterior mean $v(x)$")
+        ax.fill_between(x[:, 0], v_mean - v_std, v_mean + v_std,
+                        color='C0', alpha=0.2,
+                        label="Confidence region $\pm$ 1 std. dev.")
+        ax.plot(self.x_sample, self.v_sample, 'kx', mew=3, label="Observed data $v(x)$")
+        ax.set_xlabel('$x$')
+        ax.set_ylabel('$v(x)$')
+        ax.set_xlim(*DOMAIN[0])
+        ax.set_ylim(np.min(v_mean - 3 * v_std), np.max(v_mean + 3 * v_std))
+        ax.set_title('Constraint function')
+        ax.legend(loc='upper left')
+
+        # ax = plt.subplot(gs[0])
+        # x_opt = self.optimize_acquisition_function()
+        # f_opt = self.f_gp.predict(x_opt)
+        # ax.plot(x_opt, f_opt, 'ko', mew=3, ms=10, label="Recommendation $x^*$")
+        # ax.legend(loc='upper left')
+
+        # show the plot
+        plt.tight_layout()
+        # plt.savefig('plot.png')
+        plt.show()
 
 # ---
 # TOY PROBLEM. To check your code works as expected (ignored by checker).
