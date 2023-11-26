@@ -46,14 +46,14 @@ class BO_algo():
         self.v_kernel = Matern(nu=2.5) + DotProduct() + WhiteKernel(noise_level=0.00001, noise_level_bounds='fixed')
 
         # Define the GP models
-        self.f_gp = GaussianProcessRegressor(kernel=self.f_kernel, n_restarts_optimizer=5)
-        self.v_gp = GaussianProcessRegressor(kernel=self.v_kernel, n_restarts_optimizer=5)
+        self.f_gp = GaussianProcessRegressor(kernel=self.f_kernel)
+        self.v_gp = GaussianProcessRegressor(kernel=self.v_kernel)
 
         # Constraint violation penalty
-        self.lambda_ = 0.01
+        self.lambda_ = 0.02
         # Eploration-exploitation trade-off parameter
         self.f_beta = 1.0
-        self.v_beta = 2.0 / self.lambda_
+        self.v_beta = 5.0 / self.lambda_
   
 
 
