@@ -46,14 +46,14 @@ class BO_algo():
         self.v_kernel = Matern(nu=2.5) + DotProduct() + WhiteKernel(noise_level=0.00001, noise_level_bounds='fixed')
 
         # Define the GP models
-        self.f_gp = GaussianProcessRegressor(kernel=self.f_kernel)
-        self.v_gp = GaussianProcessRegressor(kernel=self.v_kernel)
+        self.f_gp = GaussianProcessRegressor(kernel=self.f_kernel, n_restarts_optimizer=5)
+        self.v_gp = GaussianProcessRegressor(kernel=self.v_kernel, n_restarts_optimizer=5)
 
         # Constraint violation penalty
         self.lambda_ = 0.01
         # Eploration-exploitation trade-off parameter
         self.f_beta = 1.0
-        self.v_beta = 0.5 / self.lambda_
+        self.v_beta = 2.0 / self.lambda_
   
 
 
@@ -161,7 +161,7 @@ class BO_algo():
         # compute the acquisition function
         # Here I've changed the plusses and minuses to account for the fact that
 
-        af_value = f_mean - self.f_beta * f_std - self.lambda_*max((v_mean + self.v_beta * v_std),4)
+        af_value = f_mean + self.f_beta * f_std - self.lambda_*max((v_mean + self.v_beta * v_std),4)
 
         return af_value
 
