@@ -50,7 +50,7 @@ class BO_algo():
         self.v_gp = GaussianProcessRegressor(kernel=self.v_kernel)
 
         # Constraint violation penalty
-        self.lambda_ = 0.5
+        self.lambda_ = 0.01
         # Eploration-exploitation trade-off parameter
         self.f_beta = 1.0
         self.v_beta = 0.5 / self.lambda_
