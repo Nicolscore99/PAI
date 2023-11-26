@@ -1,19 +1,18 @@
 """Solution."""
 import numpy as np
+import scipy
 from scipy.optimize import fmin_l_bfgs_b
 # import additional ...
 import math
 from sklearn.gaussian_process import GaussianProcessRegressor
-from sklearn.gaussian_process.kernels import Matern, ConstantKernel, DotProduct, RBF
+from sklearn.gaussian_process.kernels import Matern, ConstantKernel, DotProduct, RBF, ExpSineSquared, WhiteKernel
 
 import matplotlib.pyplot as plt
 from matplotlib import gridspec
 
-plt.ion()  # Enable interactive mode
-
 # global variables
 DOMAIN = np.array([[0, 10]])  # restrict \theta in [0, 10]
-SAFETY_THRESHOLD = 4  # threshold, upper bound of SA
+SAFETY_THRESHOLD = 10  # threshold, upper bound of SA
 
 
 # TODO: implement a self-contained solution in the BO_algo class.
@@ -33,27 +32,29 @@ class BO_algo():
         # Define the priors
         # Kernel for f mapping (Matern kernel)
         self.f_nu = 2.5
-        self.f_length_scale = 0.5
-        self.f_kernel = Matern(length_scale=self.f_length_scale, nu=self.f_nu)
+        self.f_length_scale = 10
+        # self.f_kernel = Matern(length_scale=self.f_length_scale, nu=self.f_nu)
+        self.f_kernel = Matern(nu=2.5) + WhiteKernel(noise_level=0.0225, noise_level_bounds='fixed')
 
         self.v_nu = 2.5
-        self.v_length_scale = 0.5
+        self.v_length_scale = 1.0
         self.v_var = math.sqrt(2)
         self.v_prior_mean = 4.0
-        self.v_kernel = DotProduct() + Matern(length_scale=self.v_length_scale, nu=self.v_nu)
+        # self.v_kernel = DotProduct() + Matern(length_scale=self.v_length_scale, nu=self.v_nu)
         # self.v_kernel = ConstantKernel(constant_value=self.v_prior_mean)*RBF(length_scale=self.v_length_scale)
-
-
+        # self.v_kernel = ExpSineSquared(length_scale=self.v_length_scale, periodicity=1.0, periodicity_bounds=(1e-2, 1e1))
+        self.v_kernel = Matern(nu=2.5) + DotProduct() + WhiteKernel(noise_level=0.00001, noise_level_bounds='fixed')
 
         # Define the GP models
         self.f_gp = GaussianProcessRegressor(kernel=self.f_kernel)
         self.v_gp = GaussianProcessRegressor(kernel=self.v_kernel)
 
-        # Eploration-exploitation trade-off parameter
-        self.f_beta = 0.5
-        self.v_beta = 1.0
         # Constraint violation penalty
         self.lambda_ = 0.5
+        # Eploration-exploitation trade-off parameter
+        self.f_beta = 1.0
+        self.v_beta = 0.5 / self.lambda_
+  
 
 
     def next_recommendation(self):
@@ -79,7 +80,29 @@ class BO_algo():
         #     x = np.random.uniform(*DOMAIN[0])
         #     return x
 
-        return self.optimize_acquisition_function()
+        # If we have a large portion of unsafe points, then create more incentive to explore
+        # if self.x_sample.size > 3 and np.mean(self.v_sample > SAFETY_THRESHOLD) > 0.5:
+        #     # This way we should choose points where the uncertainty on v is high and therefore do much more exploration
+        #     self.v_beta = 2.0*self.v_beta
+        #     print("We are in a bad place, let's explore more...")
+
+
+        # If we have a large portion of safe points, then create more incentive to exploit
+
+        # opts = []
+        # results = []
+        # for i in range(5):
+        #     opt = self.optimize_acquisition_function()
+        #     opts.append(opt)
+        #     opt = np.atleast_2d(opt)
+        #     mean, std = self.f_gp.predict(opt, return_std=True)
+        #     results.append(mean)
+
+        # Return opts value with the highest mean
+
+        # return self.optimize_acquisition_function()
+
+        return np.atleast_2d(self.optimize_acquisition_function())
 
     def optimize_acquisition_function(self):
         """Optimizes the acquisition function defined below (DO NOT MODIFY).
@@ -101,6 +124,7 @@ class BO_algo():
         for _ in range(20):
             x0 = DOMAIN[:, 0] + (DOMAIN[:, 1] - DOMAIN[:, 0]) * \
                  np.random.rand(DOMAIN.shape[0])
+            # print(x0.shape)
             result = fmin_l_bfgs_b(objective, x0=x0, bounds=DOMAIN,
                                    approx_grad=True)
             x_values.append(np.clip(result[0], *DOMAIN[0]))
@@ -132,21 +156,12 @@ class BO_algo():
         f_mean, f_std = self.f_gp.predict(x, return_std=True)
         v_mean, v_std = self.v_gp.predict(x, return_std=True)
 
+        f_mean += 4.0
+
         # compute the acquisition function
         # Here I've changed the plusses and minuses to account for the fact that
 
-        # We want to ..
-        # 1. Chose points with high f_mean
-        # 2. Chose points with low f_std
-        # 3. Chose points with low v_mean
-        # 4. Chose points with low v_std
-
-        af_value = f_mean - self.f_beta * f_std - self.lambda_*max((v_mean + self.v_beta * v_std), 0)
-
-        # print("f_mean: ", f_mean)
-        # print("f_std: ", f_std)
-        # print("v_mean: ", v_mean)
-        # print("v_std: ", v_std)
+        af_value = f_mean - self.f_beta * f_std - self.lambda_*max((v_mean + self.v_beta * v_std),4)
 
         return af_value
 
@@ -208,48 +223,50 @@ class BO_algo():
 
         print("Plotting...")
 
-        fig = plt.figure(figsize=(10, 10))
-        gs = gridspec.GridSpec(2, 1, height_ratios=[3, 1])
+        fig, ax = plt.subplots(figsize=(20, 10))
+
+        green = (0, 172, 0, 1)
+        light_green = (0, 172, 0, 0.3)
+        red = (172, 0, 0, 1)
+        light_red = (172, 0, 0, 0.3)
 
         # Plot objective function
-        ax = plt.subplot(gs[0])
         x = np.linspace(*DOMAIN[0], 100)[:, None]
+        f_x = np.vectorize(f)(x)
+        ax.plot(x, f_x, 'k', lw=1, zorder=9, label="Objective function $f(x)$")
+        # plot the constraint function
+        v_x = np.vectorize(v)(x)
+        ax.plot(x, v_x, '--k', lw=1, zorder=9, label="Constraint function $v(x)$")
+        # plot the constraint threshold
+        ax.plot(x, np.ones(x.shape)*SAFETY_THRESHOLD, '--k', lw=2, zorder=9, label="Safety threshold")
+
+        # Plot GP posterior of all points we have sampled
+        self.f_gp.fit(self.x_sample, self.f_sample)
         f_mean, f_std = self.f_gp.predict(x, return_std=True)
-        ax.plot(x, f_mean, 'k', lw=2, zorder=9, label="Posterior mean $f(x)$")
+        print("x", x)
+        print("f_samle", self.f_sample)
+        print("f_mean", f_mean)
+        ax.plot(x, f_mean, 'g', lw=1, zorder=9, label="Posterior mean $f(x)$")
         ax.fill_between(x[:,0], f_mean - f_std, f_mean + f_std,
-                        color='C0', alpha=0.2,
+                        color=[light_green]*100, alpha=0.2,
                         label="Confidence region $\pm$ 1 std. dev.")
-        ax.plot(self.x_sample, self.f_sample, 'kx', mew=3, label="Observed data $f(x)$")
-        ax.set_ylabel('$f(x)$')
-        ax.set_xlim(*DOMAIN[0])
-        ax.set_ylim(np.min(f_mean - 3 * f_std), np.max(f_mean + 3 * f_std))
-        ax.set_title('Objective function')
-        ax.legend(loc='upper left')
+        ax.plot(self.x_sample, self.f_sample, 'gx', mew=1, label="Observed data $f(x)$")
 
-        # Plot constraint function
-        ax = plt.subplot(gs[1])
+        # Plot GP posterior of all points we have sampled
         v_mean, v_std = self.v_gp.predict(x, return_std=True)
-        ax.plot(x, v_mean, 'k', lw=2, zorder=9, label="Posterior mean $v(x)$")
+        print(v_mean)
+        ax.plot(x, v_mean, 'r', lw=1, zorder=9, label="Posterior mean $v(x)$")
         ax.fill_between(x[:, 0], v_mean - v_std, v_mean + v_std,
-                        color='C0', alpha=0.2,
+                        color=[light_red]*100, alpha=0.2,
                         label="Confidence region $\pm$ 1 std. dev.")
-        ax.plot(self.x_sample, self.v_sample, 'kx', mew=3, label="Observed data $v(x)$")
-        ax.set_xlabel('$x$')
-        ax.set_ylabel('$v(x)$')
+        ax.plot(self.x_sample, self.v_sample, 'rx', mew=1, label="Observed data $v(x)$")
+
+        # define axis bounds
         ax.set_xlim(*DOMAIN[0])
-        ax.set_ylim(np.min(v_mean - 3 * v_std), np.max(v_mean + 3 * v_std))
-        ax.set_title('Constraint function')
-        ax.legend(loc='upper left')
+        ax.set_ylim(-10, 20)
 
-        # ax = plt.subplot(gs[0])
-        # x_opt = self.optimize_acquisition_function()
-        # f_opt = self.f_gp.predict(x_opt)
-        # ax.plot(x_opt, f_opt, 'ko', mew=3, ms=10, label="Recommendation $x^*$")
-        # ax.legend(loc='upper left')
+        plt.legend()
 
-        # show the plot
-        plt.tight_layout()
-        # plt.savefig('plot.png')
         plt.show()
 
 # ---
@@ -264,13 +281,16 @@ def check_in_domain(x: float):
 
 def f(x: float):
     """Dummy logP objective"""
-    mid_point = DOMAIN[:, 0] + 0.5 * (DOMAIN[:, 1] - DOMAIN[:, 0])
-    return - np.linalg.norm(x - mid_point, 2)
+    # mid_point = DOMAIN[:, 0] + 0.5 * (DOMAIN[:, 1] - DOMAIN[:, 0])
+    # return - np.linalg.norm(x - mid_point, 2)
+
+    return (-x + 0.3*(x-2)*(x-8) - 1/2**(x-4)) + 10
 
 
 def v(x: float):
     """Dummy SA"""
-    return 2.0
+    # return 2.0
+    return 5 + np.sin(1.1*x - 2.0)*5.0 + x / 4.0
 
 
 def get_initial_safe_point():
@@ -307,9 +327,11 @@ def main():
             f"shape (1, {DOMAIN.shape[0]})"
 
         # Obtain objective and constraint observation
-        obj_val = f(x) + np.randn()
-        cost_val = v(x) + np.randn()
+        obj_val = f(x) + np.random.randn()
+        cost_val = v(x) + np.random.randn()
         agent.add_data_point(x, obj_val, cost_val)
+
+    agent.plot()
 
     # Validate solution
     solution = agent.get_solution()
