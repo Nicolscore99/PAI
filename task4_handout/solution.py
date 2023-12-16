@@ -60,6 +60,38 @@ class NeuralNetwork(nn.Module):
 
         return x
     
+# class NeuralNetwork(nn.Module):
+#     '''
+#     This class implements a neural network with a variable number of hidden layers and hidden units.
+#     You may use this function to parametrize your policy and critic networks.
+#     '''
+#     def __init__(self, input_dim: int, output_dim: int, hidden_size: int, 
+#                                 hidden_layers: int, activation: str):
+#         super(NeuralNetwork, self).__init__()
+
+#         # TODO: Implement this function which should define a neural network 
+#         # with a variable number of hidden layers and hidden units.
+#         # Here you should define layers which your network will use
+
+#         self.activation = activation
+#         self.layers = nn.ModuleList()
+
+#         # Add first layer to Module List
+#         self.layers.append(nn.Linear(input_dim, hidden_size))
+#         # Add hidden layers to Module List
+#         for i in range(hidden_layers-1):
+#             self.layers.append(nn.Linear(hidden_size, hidden_size))
+#         # Add last layer to module list
+#         self.layers.append(nn.Linear(hidden_size, output_dim))
+
+
+
+#     def forward(self, s: torch.Tensor) -> torch.Tensor:
+#         # TODO: Implement the forward pass for the neural network you have defined.
+#         for layer in self.layers:
+#             s = nn.functional.relu(layer(s))
+#         return s
+    
 class Actor:
     def __init__(self,hidden_size: int, hidden_layers: int, actor_lr: float,
                 state_dim: int = 3, action_dim: int = 1, device: torch.device = torch.device('cpu')):
@@ -82,9 +114,9 @@ class Actor:
         # TODO: Implement this function which sets up the actor network. 
         # Take a look at the NeuralNetwork class in utils.py. 
         
-        self.policy_net = NeuralNetwork(self.state_dim, self.action_dim, self.hidden_size, self.hidden_layers, 'relu')
+        self.policy_net = NeuralNetwork(self.state_dim, self.action_dim*2, self.hidden_size, self.hidden_layers, 'relu')
         self.policy_net = self.policy_net.to(self.device)
-        self.policy_net_optimizer = optim.Adam(self.policy_net.parameters(), lr=self.actor_lr)
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=self.actor_lr)
 
 
     def clamp_log_std(self, log_std: torch.Tensor) -> torch.Tensor:
@@ -108,33 +140,34 @@ class Actor:
         assert state.shape == (3,) or state.shape[1] == self.state_dim, 'State passed to this method has a wrong shape'
         action , log_prob = torch.zeros(state.shape[0]), torch.ones(state.shape[0])
     
-        print(action.shape)
+        # print(action.shape)
         # TODO: Implement this function which returns an action and its log probability.
         # If working with stochastic policies, make sure that its log_std are clamped 
         # using the clamp_log_std function.
 
         # Get the mean and log_std from the policy network
-        x = self.policy_net(state)
-        
-        action = x
-        log_prob = x
-        log_prob = self.clamp_log_std(log_prob)
+        output = self.policy_net(state)
+        output = torch.atleast_2d(output)
+        mu, log_std = output[:,0], output[:,1]
 
-        std = torch.exp(log_prob)
-        normal = Normal(0,1)
-        z = normal.sample().to(self.device)
-        action = torch.tanh(action + z * std)
-        action = action.cpu().detach().numpy()
+        log_std = self.clamp_log_std(log_std)
+        std = torch.exp(log_std)
 
-        print(action.shape)
-        print(log_prob.shape)
-        print(state.shape[0])
-        print(self.action_dim)
+        if deterministic:
+            action = mu
+        else:
+            #print("STD: ", std)
+            #print("MU: ", mu)
+            m = Normal(mu, std)
+            #print("m: ", m)
+            action = m.sample()
+            #action = torch.unsqueeze(action,0)
+            #print("ACTION: ", action)
+            log_prob = m.log_prob(action)
+            action = torch.tanh(action)
 
-        # Something is wrong here and I don't know what
-
-        assert action.shape == (state.shape[0], self.action_dim) and \
-            log_prob.shape == (state.shape[0], self.action_dim), 'Incorrect shape for action or log_prob.'
+        # assert action.shape == (state.shape[0], self.action_dim) and \
+        #     log_prob.shape == (state.shape[0], self.action_dim), 'Incorrect shape for action or log_prob.'
         return action, log_prob
 
 
@@ -156,20 +189,23 @@ class Critic:
         # class in utils.py. Note that you can have MULTIPLE critic networks in this class.
         
         # Implement the value network here.
-        self.value_net = NeuralNetwork(self.state_dim, 1, self.hidden_size, self.hidden_layers, 'relu')
-        self.value_net = self.value_net.to(self.device)
-        self.value_net_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_lr)
+        # self.value_net = NeuralNetwork(self.state_dim, 1, self.hidden_size, self.hidden_layers, 'relu')
+        # self.value_net = self.value_net.to(self.device)
+        # self.value_net_optimizer = optim.Adam(self.value_net.parameters(), lr=self.critic_lr)
 
         # Implement the target value network here.
-        self.value_net_target = NeuralNetwork(self.state_dim, 1, self.hidden_size, self.hidden_layers, 'relu')
-        self.value_net_target = self.value_net_target.to(self.device)
-        self.value_net_target.load_state_dict(self.value_net.state_dict())
-        self.value_net_target_optimizer = optim.Adam(self.value_net_target.parameters(), lr=self.critic_lr)
+        # self.value_net_target = NeuralNetwork(self.state_dim, 1, self.hidden_size, self.hidden_layers, 'relu')
+        # self.value_net_target = self.value_net_target.to(self.device)
+        # self.value_net_target.load_state_dict(self.value_net.state_dict())
+        # self.value_net_target_optimizer = optim.Adam(self.value_net_target.parameters(), lr=self.critic_lr)
 
         # Implement the two soft q networks here.
-        self.q_net = NeuralNetwork(self.state_dim+self.action_dim, 1, self.hidden_size, self.hidden_layers, 'relu')
-        self.q_net_optimizer = optim.Adam(self.q_net.parameters(), lr=self.critic_lr)
+        # self.q_net = NeuralNetwork(self.state_dim+self.action_dim, 1, self.hidden_size, self.hidden_layers, 'relu')
+        # self.q_net_optimizer = optim.Adam(self.q_net.parameters(), lr=self.critic_lr)
 
+        self.net = NeuralNetwork(self.state_dim, self.action_dim, self.hidden_size, self.hidden_layers, 'relu')
+        self.net = self.net.to(self.device)
+        self.optimizer = optim.Adam(self.net.parameters(), lr=self.critic_lr)
 
 
 class TrainableParameter:
@@ -217,7 +253,15 @@ class Agent:
         
         self.policy = Actor(hidden_size=256, hidden_layers=2, actor_lr=1e-3, state_dim=self.state_dim, action_dim=self.action_dim, device=self.device)
  
-        self.critic = Critic(256, 2, 1e-3, self.state_dim, self.action_dim, self.device)
+        v_critic_input_size = self.state_dim
+        v_critic_output_size = 1
+        self.v_critic = Critic(256, 3, 1e-3, v_critic_input_size, v_critic_output_size, self.device)
+
+        self.v_critic_target = Critic(256, 3, 1e-3, v_critic_input_size, v_critic_output_size, self.device)
+
+        q_critic_input_size = (self.state_dim + self.action_dim)
+        q_critic_output_size = 1
+        self.q_critic = Critic(256, 3, 1e-3, q_critic_input_size, q_critic_output_size, self.device)
 
     def get_action(self, s: np.ndarray, train: bool) -> np.ndarray:
         """
@@ -230,7 +274,10 @@ class Agent:
         # TODO: Implement a function that returns an action from the policy for the state s.
         
         # Get the action from the policy
-        action, _ = self.policy.get_action_and_log_prob(torch.tensor(s, dtype=torch.float32).to(self.device), train)
+        s = torch.from_numpy(s)
+        action, log_prob = self.policy.get_action_and_log_prob(s, False)
+        action = action.numpy()
+
 
         assert action.shape == (1,), 'Incorrect action shape.'
         assert isinstance(action, np.ndarray ), 'Action dtype must be np.ndarray' 
@@ -244,8 +291,9 @@ class Agent:
         and optimizer inside the object, you could find this function useful while training.
         :param object: object containing trainable parameters and an optimizer
         '''
+        torch.autograd.set_detect_anomaly(True)
         object.optimizer.zero_grad()
-        loss.mean().backward()
+        loss.mean().backward(retain_graph=True)
         object.optimizer.step()
 
     def critic_target_update(self, base_net: NeuralNetwork, target_net: NeuralNetwork, 
@@ -258,6 +306,9 @@ class Agent:
         :param tau: soft update parameter
         :param soft_update: boolean to indicate whether to perform a soft update or not
         '''
+
+        # Large Tau means fast mooving target, small Tau means slow moving target
+
         for param_target, param in zip(target_net.parameters(), base_net.parameters()):
             if soft_update:
                 param_target.data.copy_(param_target.data * (1.0 - tau) + param.data * tau)
@@ -279,39 +330,31 @@ class Agent:
         s_batch, a_batch, r_batch, s_prime_batch = batch
 
         # Evaluate all the networks
-        value_net = self.critic.value_net(s_batch)
-        value_target_net = self.critic.value_net_target(s_prime_batch)
-        q_net = self.critic.q_net(torch.cat((s_batch, a_batch), dim=1))
+        value_net_output = self.v_critic.net(s_batch)
+        value_net_s_prime_output = self.v_critic_target.net(s_prime_batch)
+        q_net = self.q_critic.net(torch.cat((s_batch, a_batch), dim=1))
         action, log_prob = self.policy.get_action_and_log_prob(s_batch, False)
 
-        value_network_target = q_net - log_prob
-
-        scaled_reward = r_batch/ self.entropy_temp.get_param()
+        value_network_target = q_net - log_prob ## What tha f*ck do we need this for??
+        # value_network_target = value_net_s_prime - log_prob
 
         # Update the value network
-        self.critic.value_net_optimizer.zero_grad()
-
-        value_loss = nn.functional.mse_loss(value_net, value_network_target)
-        value_loss.backward()
-        self.critic.value_net_optimizer.step()
-
-        # Update the target value network
-        self.critic_target_update(self.critic.value_net, self.critic.value_net_target, self.tau, True)
+        value_loss = nn.functional.mse_loss(value_net_output, value_network_target)
+        self.run_gradient_update_step(self.v_critic, value_loss)
 
         # Update the Q network
-        target_q = scaled_reward + self.gamma * value_target_net
+        target_q = r_batch + self.gamma * value_net_s_prime_output
         q_loss = nn.functional.mse_loss(q_net, target_q)
-
-        self.critic.q_net_optimizer.zero_grad()
-        q_loss.backward()
-        self.critic.q_net_optimizer.step()
+        self.run_gradient_update_step(self.q_critic, q_loss)
 
         # Update the policy network
-        policy_loss = (log_prob - q_net).mean()
-        self.policy.policy_net_optimizer.zero_grad()
-        policy_loss.backward()
-        self.policy.policy_net_optimizer.step()
-        
+        policy_loss = (log_prob - target_q).mean()
+        self.run_gradient_update_step(self.policy, policy_loss)
+
+        # self.run_gradient_update_step(self.entropy_temp, policy_loss)
+
+        # Update the target value
+        self.critic_target_update(self.v_critic_target.net, self.v_critic.net, self.tau, True)
 
 
 # This main function is provided here to enable some basic testing. 
